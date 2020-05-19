@@ -1,0 +1,88 @@
+#!/bin/sh  
+
+ROOT_PWD=""
+USER_NAME=""
+USER_PWD=""
+USER_DB=""
+DATA_DB=""
+CHARSET=""
+COLLATE=""
+MAX_ALLOWED_PACKET=""
+
+while getopts 'r:u:p:d:c:C:m:' opt;
+do
+    case $opt in
+        r) ROOT_PWD=$OPTARG ;;
+        u) USER_NAME=$OPTARG ;;
+        p) USER_PWD=$OPTARG ;;
+        d) USER_DB=$OPTARG ;;
+        c) CHARSET=$OPTARG ;;
+        C) COLLATE=$OPTARG ;;
+        m) MAX_ALLOWED_PACKET=$OPTARG ;;
+    esac
+done
+
+if [ ! -d "/run/mysqld" ]; then
+    echo '[i] MySQL run directory not found, creating.'
+	  mkdir -p /run/mysqld
+	  chown -R mysql:mysql /run/mysqld
+
+fi
+
+if [ -d /var/lib/mysql/mysql ]; then
+	  echo '[i] MySQL directory already present, skipping creation'
+else
+	  echo "[i] MySQL data directory not found, creating initial DBs"
+	  chown mysql /var/lib/mysql
+    chgrp mysql /var/lib/mysql
+
+	  # init database
+	  echo '[i] Initializing database'
+    mysql_install_db --user=mysql --ldata=/var/lib/mysql > /dev/null 
+    echo '[i] Database initialized'
+
+    # create temp file
+	  tfile=`mktemp`
+	  
+	  # save sql
+	  echo "[i] Create temp file: $tfile"
+    echo '[i] Granting root privilegies'
+    echo "USE mysql;" > $tfile
+    echo "FLUSH PRIVILEGES;" >> $tfile
+    for domain in 127.0.0.1 localhost ::1 %;
+    do
+        echo "GRANT ALL ON *.* TO 'root'@'"$domain"' IDENTIFIED BY '"$ROOT_PWD"' WITH GRANT OPTION;" >> $tfile
+    done
+    echo '[i] Deleting anonymous user'
+    echo "DELETE FROM mysql.user WHERE User='';" >> $tfile
+
+    echo '[i] Droping test database'
+    echo "DROP DATABASE test;" >> $tfile
+
+	  echo "[i] Creating database: $USER_DB"
+		echo "CREATE DATABASE IF NOT EXISTS \`"$USER_DB"\` CHARACTER SET "$CHARSET" COLLATE "$COLLATE";" >> $tfile
+    
+	  echo "[i] Creating user: $USER_NAME"
+		echo "GRANT ALL ON \`"$USER_DB"\`.* to '"$USER_NAME"'@'%' IDENTIFIED BY '"$USER_PWD"';" >> $tfile
+
+    echo "[i] Flushing privilegies"
+	  echo 'FLUSH PRIVILEGES;' >> $tfile
+
+    # run sql in tempfile
+	  exec /usr/bin/mysqld \
+        --user=mysql \
+        --bootstrap \
+        --verbose=1 \
+        --skip-networking=0 < $tfile
+
+	  rm -f $tfile
+fi
+
+echo "[i] Sleeping 5 seconds"
+sleep 5
+
+echo "[i] Running mysqld"
+exec /usr/bin/mysqld \
+     --user=mysql \
+     --console \
+     --skip-networking=0

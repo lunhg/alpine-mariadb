@@ -1,0 +1,46 @@
+version: '2'
+networks:
+  mariadb:
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.0.0.0/8
+
+services:
+
+  loadbalancer:
+    image: traefik:v1.7
+    ports:
+      - 80:80/tcp
+      - 8080:8080/tcp
+      - 443:443/tcp
+    build:
+      context: .
+      dockerfile: Dockerfile.loadbalancer
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik.toml:/etc/traefik/traefik.toml
+    labels:
+      traefik.frontend.rule: Host:lb.docker.localhost
+      traefik.alias: loadbalancer
+      traefik.port: '8080'
+      traefik.enable: 'true'
+    networks:
+      mariadb:
+        ipv4_address: 10.0.0.100
+    
+  mysql:
+    image: ninja/alpine-mariadb:latest
+    ports:
+      - "3306:3306"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes: 
+      - $PWD/mysql_data:/var/lib/mysql:rw
+    depends_on:
+      - loadbalancer
+    env_file: .env
+    networks:
+      mariadb:
+        ipv4_address: 10.0.0.2
